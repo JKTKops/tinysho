@@ -7,12 +7,33 @@ namespace Piece {
     return pt ^ PIECE_COLOR_MASK;
   }
 
-  piece color_piece(piece_type pt, Board::color color) {
+  piece color_piece(piece_type pt, bool color) {
     if (color) {
       return pt | GOTE;
     } else {
       return pt | SENTE;
     }
+  }
+
+  bool color(piece pt) {
+    if (pt & Piece::SENTE)     return Board::SENTE;
+    else if (pt & Piece::GOTE) return Board::GOTE;
+    throw std::invalid_argument("Piece color is not set!");
+  }
+
+  bool is_color(piece pt, bool color) {
+    return (color  && !!(pt & GOTE))
+        || (!color && !!(pt & SENTE));
+  }
+
+  piece promote(piece pt) {
+    return pt | PROMOTED;
+  }
+  piece demote(piece pt) {
+    return pt & ~PROMOTED;
+  }
+  piece_type type(piece pt) {
+    return pt & PIECE_TYPE_MASK;
   }
 
   std::ostream& operator<<(std::ostream& os, const Printable pt) {
