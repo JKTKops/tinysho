@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <bit>
 
+#include <sstream>
+
 namespace Movegen {
 
   /* Movement Generation slow version 1
@@ -63,20 +65,37 @@ namespace Movegen {
   // represented as 8 bits, one per direction, LSB is North,
   // MSB is southwest. We can iterate directions effeciently
   // with std::countr_zero and CLSB.
-  uint8_t steps_of[Piece::NB_PIECE_TYPES] = {
-    /* NO_PIECE */ 0,
-    /* PAWN */     0b00000001,
-    /* SILVER */   0b11110001,
-    /* GOLD */     0b00111111,
-    /* BISHOP */   0,
-    /* ROOK */     0,
-    /* KING */     0b11111111,
-    /* UNUSEDx2 */ 0, 0,
-    /* TOKIN */    0b00111111,
-    /* UNUSED */   0,
-    /* P_SILVER */ 0b00111111,
-    /* HORSE */    0b00001111,
-    /* DRAGON */   0b11110000,
+  uint8_t steps_of[2][Piece::NB_PIECE_TYPES] = {
+    { /* ******* SENTE ******* */
+      /* NO_PIECE */ 0,
+      /* PAWN */     0b00000001,
+      /* SILVER */   0b11110001,
+      /* GOLD */     0b00111111,
+      /* BISHOP */   0,
+      /* ROOK */     0,
+      /* KING */     0b11111111,
+      /* UNUSEDx2 */ 0, 0,
+      /* TOKIN */    0b00111111,
+      /* P_SILVER */ 0b00111111,
+      /* UNUSED */   0,
+      /* HORSE */    0b00001111,
+      /* DRAGON */   0b11110000,
+    },
+    { /* ******* GOTE ******* */
+      /* NO_PIECE */ 0,
+      /* PAWN */     0b00000010,
+      /* SILVER */   0b11110010,
+      /* GOLD */     0b11001111,
+      /* BISHOP */   0,
+      /* ROOK */     0,
+      /* KING */     0b11111111,
+      /* UNUSEDx2 */ 0, 0,
+      /* TOKIN */    0b11001111,
+      /* P_SILVER */ 0b11001111,
+      /* UNUSED */   0,
+      /* HORSE */    0b00001111,
+      /* DRAGON */   0b11110000,
+    }
   };
 
   direction& operator++(direction& d) {
@@ -124,7 +143,7 @@ namespace Movegen {
     std::vector<Board::Move>& moves
   ) {
     bool promotable = Piece::can_promote(p);
-    uint8_t step_mask = steps_of[Piece::type(p)];
+    uint8_t step_mask = steps_of[us][Piece::type(p)];
     for ( ; step_mask; step_mask = CLSB(step_mask)) {
       direction d = (direction)std::__countr_zero(step_mask);
       // can step in that direction?
@@ -187,4 +206,101 @@ namespace Movegen {
     return moves;
   }
 
+  Board::square our_king_sq() {
+    for (auto sq : Board::occupancy[us]) {
+      Piece::piece p = Board::Square[sq];
+      if (p == Piece::color_piece(Piece::KING, us)) {
+        return sq;
+      }
+    }
+    throw std::invalid_argument("position has no king?");
+  }
+
+  bool allow_drop_pawn_checkmate = false;
+  /// VERY SLOW legality check. Check if move is legal by making it, generating
+  /// all of our opponent's (pseudolegal) moves, and checking if any of them
+  /// have our king's square as a destination. Pseudolegal moves capturing
+  /// our king are enough to make our move illegal, as we were left in check.
+  /// Finally, if our move was a pawn drop that attacked the king, check if
+  /// the resulting position is checkmate by searching for pseudolegal moves
+  /// that capture the pawn or move the king and recursively testing if they
+  /// are legal.
+  bool is_legal(Board::Move m, Board::square king_square) {
+    Board::StateInfo si;
+    Board::do_move(m, si);
+    us = Board::to_move;
+    them = !us;
+    // if they moved their king, update where we think the king is
+    if (king_square == m.origin) {
+      king_square = m.destination;
+    }
+
+    std::vector<Board::Move> opp_moves;
+    // pseudolegal() but without the drops, which can't take our king
+    for (auto sq : Board::occupancy[Board::to_move]) {
+      Piece::piece piece = Board::Square[sq];
+      if (Piece::is_sliding_piece(piece)) {
+        generate_sliding_moves(sq, piece, opp_moves);
+      }
+      generate_step_moves(sq, piece, opp_moves);
+    }
+
+    bool king_is_dead = false;
+    bool pawn_drop_mate = false;
+    for (Board::Move opp_move : opp_moves) {
+      if (opp_move.destination == king_square) {
+        //std::cerr << m << " is illegal because of " << opp_move << std::endl;
+        king_is_dead = true;
+        goto done;
+      }
+    }
+
+    if (Piece::type(m.pieceDrop) == Piece::PAWN
+        && !allow_drop_pawn_checkmate) {
+      // move dropped a pawn and we have to check legality
+      int drop_color = Piece::PIECE_COLOR_MASK & m.pieceDrop;
+      direction pawn_atk_dir = drop_color == Piece::SENTE
+        ? NORTH : SOUTH;
+      Board::square pawn_atk = m.destination + direction_offsets[pawn_atk_dir];
+      Piece::piece atk_piece = Board::Square[pawn_atk];
+      if (Piece::type(atk_piece) != Piece::KING ||
+          (atk_piece & Piece::PIECE_COLOR_MASK) == drop_color) {
+        goto done;
+      }
+      // move dropped a pawn and attacked opponent's king.
+      // recursively test legality of opponent moves that move their king or
+      // capture our pawn. If any are legal, this isn't mate.
+      // We didn't generate drops, so we can't possibly inspect an opponent's
+      // move that drops a pawn attacking _our_ king, leading to more layers
+      // of recursion. Even if we did, that drop from them would not be legal,
+      // since their king would still be attacked.
+      pawn_drop_mate = true;
+      for (Board::Move opp_move : opp_moves) {
+        if (opp_move.destination == m.destination || opp_move.origin == pawn_atk) {
+          if (is_legal(opp_move, pawn_atk)) {
+            pawn_drop_mate = false;
+            goto done;
+          }
+        }
+      }
+    }
+
+  done:
+    Board::undo_move(m);
+    return !king_is_dead && !pawn_drop_mate;
+  }
+
+  std::vector<Board::Move> legal() {
+    std::vector<Board::Move> moves = pseudolegal();
+    Board::square our_king = our_king_sq();
+
+    moves.erase(
+      std::remove_if(
+        moves.begin(), moves.end(),
+        [our_king](auto m){return !is_legal(m, our_king);}
+      ),
+      moves.end()
+    );
+    return moves;
+  }
 }

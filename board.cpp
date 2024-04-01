@@ -1,5 +1,7 @@
 #include "board.hpp"
+#include "movegen.hpp" // for slow checkmate detection, remove later!
 #include <algorithm>
+#include <cassert>
 #include <cstring>
 #include <sstream>
 #include <iterator>
@@ -14,10 +16,10 @@ namespace Board {
   std::vector<color> colors = {SENTE, GOTE};
 
   Move::Move(square orig, square dest, bool promo)
-    : origin(orig), destination(dest), piece_drop(Piece::NO_PIECE), promotion(promo)
+    : origin(orig), destination(dest), pieceDrop(Piece::NO_PIECE), promotion(promo)
     { }
   Move::Move(square dest, Piece::piece_type pt)
-    : origin(-1), destination(dest), piece_drop(pt), promotion(false)
+    : origin(-1), destination(dest), pieceDrop(pt), promotion(false)
     { }
 
   std::ostream& operator<<(std::ostream& os, const Move& move) {
@@ -26,14 +28,171 @@ namespace Board {
             destr = move.destination / 5,
             destf = move.destination % 5;
 
-    if (move.piece_drop == Piece::NO_PIECE) {
+    if (move.pieceDrop == Piece::NO_PIECE) {
       os << origf+1 << (char)(origr + 'a') << destf+1 << (char)(destr + 'a');
       if (move.promotion) os << '+';
     } else {
-      os << (Piece::Printable)(move.piece_drop) << '*'
+      os << (Piece::Printable)(move.pieceDrop) << '*'
          << destf+1 << (char)(destr + 'a');
     }
     return os;
+  }
+
+  StateInfo *st = NULL;
+  StateInfo::StateInfo() : prev(NULL) { }
+
+  /// @brief Evacuate a square, returning the piece that was there.
+  Piece::piece evacuate(square sq, color c) {
+    Piece::piece p = Board::Square[sq];
+    if (p == Piece::NO_PIECE) return p;
+
+    Board::Square[sq] = Piece::NO_PIECE;
+    Board::occupancy[c].erase(sq);
+    return p;
+  }
+  Piece::piece evacuate(square sq) {
+    Piece::piece p = Board::Square[sq];
+    return evacuate(sq, Piece::color(p));
+  }
+
+  /// @brief Occupy a square with the given piece.
+  void occupy(square sq, Piece::piece p, color c) {
+    Board::Square[sq] = p;
+    Board::occupancy[c].insert(sq);
+  }
+  void occupy(square sq, Piece::piece p) {
+    occupy(sq, p, Piece::color(p));
+  }
+
+  void do_move(Move m, StateInfo& new_st) {
+    // We must treat new_st as being completely invalid and initialize anything
+    // that we care about.
+    new_st.prev = st;
+    new_st.capturedPiece = Piece::NO_PIECE;
+    st = &new_st;
+
+    color us = Board::to_move;
+    color them = !us;
+
+    Board::to_move = them; // swap player to move
+
+    if (m.pieceDrop != Piece::NO_PIECE) {
+      // this move is a drop.
+      
+      // Ensure target square is empty.
+      assert(Board::Square[m.destination] == Piece::NO_PIECE);
+      // ensure the piece being dropped is our color.
+      assert(Piece::color(m.pieceDrop) == us);
+      // ensure we have one of these to drop.
+      assert(Board::hand[us][Piece::type(m.pieceDrop)] > 0);
+
+      // Remove one of these from our hand.
+      Board::hand[us][Piece::type(m.pieceDrop)]--;
+      occupy(m.destination, m.pieceDrop, us);
+    }
+    else {
+      // this move is a proper move.
+
+      // ensure there is a moving piece and that it is our color
+      assert(Board::Square[m.origin] != Piece::NO_PIECE);
+      assert(Piece::color(Board::Square[m.origin]) == us);
+      // ensure that if there is a captured piece, it is not our color
+      assert(Board::Square[m.destination] == Piece::NO_PIECE
+             || Piece::color(Board::Square[m.destination]) == them);
+
+      // Evacuate the origin square
+      Piece::piece moving_piece = evacuate(m.origin, us);
+      // Evacuate the destination
+      Piece::piece captured_piece = evacuate(m.destination, them);
+
+      // If a piece is being captured...
+      if (captured_piece != Piece::NO_PIECE) {
+        // add one of its piece type to our hand
+        Board::hand[us][Piece::type(captured_piece)]++;
+        st->capturedPiece = captured_piece;
+      }
+
+      // If the moving piece is being promoted...
+      if (m.promotion) {
+        assert(Piece::can_promote(moving_piece));
+        moving_piece = Piece::promote(moving_piece);
+      }
+
+      // Occupy the target square.
+      occupy(m.destination, moving_piece, us);
+    }
+  }
+
+  void undo_move(Move m) {
+    color them = Board::to_move;
+    color us = !them;
+    Board::to_move = us;
+
+    if (m.pieceDrop != Piece::NO_PIECE) {
+      // undoing a drop.
+      // Evacuate the destination square.
+      Piece::piece p = evacuate(m.destination, us);
+      // Ensure the dropped piece was on the destination square.
+      assert(p == m.pieceDrop);
+      // Pick up the piece.
+      // (using m.pieceDrop instead of p allows instructions to overlap)
+      Board::hand[us][Piece::type(m.pieceDrop)]++;
+    }
+    else {
+      // undoing a proper move.
+      // Ensure the origin square is empty.
+      assert(Board::Square[m.origin] == Piece::NO_PIECE);
+      // Evacuate the destination and occupy the origin, possibly demoting.
+      Piece::piece p = evacuate(m.destination, us);
+      if (m.promotion) p = Piece::demote(p);
+      occupy(m.origin, p, us);
+
+      // If this move was a capture, remove the captured piece from our hand
+      // and put it back on the destination square with the opponent's color.
+      // Take care - the captured piece may have been promoted!
+      Piece::piece captured = st->capturedPiece;
+      if (captured != Piece::NO_PIECE) {
+        Board::hand[us][Piece::type(captured)]--;
+        occupy(m.destination, captured, them);
+      }
+    }
+
+    // unwind stateinfo
+    st = st->prev;
+  }
+
+  //bool is_checkmate() {
+  //}
+
+  void check_consistency() {
+    unsigned counts[Piece::KING+1]{};
+
+    for (Board::square sq = 0; sq < 25; ++sq) {
+      Piece::piece p = Board::Square[sq];
+      if (p != Piece::NO_PIECE) {
+        counts[Piece::upt(p)]++;
+        Board::color c = Piece::color(p);
+        assert(Board::occupancy[c].count(sq));
+      }
+    }
+    for (Board::color c : Board::colors) {
+      for (Board::square sq : Board::occupancy[c]) {
+        Piece::piece p = Board::Square[sq];
+        assert(p != Piece::NO_PIECE);
+        assert(Piece::color(p) == c);
+      }
+
+      for (int i = Piece::PAWN; i < Piece::NB_UNPROMOTED; ++i) {
+        counts[i] += Board::hand[c][i];
+      }
+    }
+
+    assert(counts[Piece::PAWN] == 2);
+    assert(counts[Piece::SILVER] == 2);
+    assert(counts[Piece::GOLD] == 2);
+    assert(counts[Piece::BISHOP] == 2);
+    assert(counts[Piece::ROOK] == 2);
+    assert(counts[Piece::KING] == 2);
   }
 
   bool in_promo_zone(square sq, color c) {
@@ -154,10 +313,10 @@ namespace Board {
 
     std::string s = FEN;
     auto pos = s.find(" ");
-    std::string boardFEN  = FEN.substr(0, pos);
+    std::string boardFEN  = s.substr(0, pos);
     s = s.substr(pos + 1);
     pos = s.find(" ");
-    std::string playerFEN = FEN.substr(0, pos);
+    std::string playerFEN = s.substr(0, pos);
     s = s.substr(pos + 1);
     std::string handFEN = s;
 
@@ -187,11 +346,11 @@ namespace Board {
       }
     }
 
-    if (playerFEN.length() != 1 &&
-        playerFEN[0] != 'b' &&
-        playerFEN[0] != 'w')
+    if (playerFEN.length() != 1 ||
+        (playerFEN[0] != 'b' &&
+         playerFEN[0] != 'w'))
     {
-      std::cout << playerFEN;
+      std::cerr << playerFEN;
       throw std::invalid_argument("malformed player-to-move");
     } else if (playerFEN[0] == 'b') {
       Board::to_move = false;

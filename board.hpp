@@ -42,7 +42,7 @@ namespace Board {
   struct Move {
     square origin;      // undefined if drop is not NO_PIECE
     square destination; // always in [0,24]
-    uint8_t piece_drop; // What piece is being dropped?
+    uint8_t pieceDrop;  // What piece is being dropped?
     bool promotion;     // moving piece is promoting?
 
     //Move() = default;
@@ -51,6 +51,30 @@ namespace Board {
 
     friend std::ostream& operator<<(std::ostream& os, const Move& move);
   };
+
+  /// There is some extra state associated with a board, in particular with the
+  /// last move. More can easily be added here in the future. For now, we track
+  /// what piece the previous move captured (perhaps none!) so that we can undo
+  /// moves later.
+  /// StateInfo objects form a linked list which will generally consist entirely
+  /// of stack objects.
+  class StateInfo {
+  public:
+    StateInfo *prev;
+    Piece::piece capturedPiece = Piece::NO_PIECE;
+
+    StateInfo();
+    StateInfo(StateInfo& si) = default;
+    StateInfo(StateInfo&& si) = default;
+  };
+  extern StateInfo *st;
+
+  void do_move(Move m, StateInfo& new_st);
+  void undo_move(Move m);
+
+  bool is_checkmate();
+
+  void check_consistency();
 
   bool in_promo_zone(square sq, color c);
 

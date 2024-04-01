@@ -21,4 +21,6 @@ namespace Movegen {
   /// Generate escapes from checks
   /// (what will this do if position is not check?)
   std::vector<Board::Move> check_escapes();
+
+  extern bool allow_drop_pawn_checkmate;
 }
