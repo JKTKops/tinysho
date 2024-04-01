@@ -9,7 +9,7 @@ namespace Movegen {
   std::vector<Board::Move> pseudolegal();
   /// Generate all legal moves.
   std::vector<Board::Move> legal();
-  /// Generate all drops.
+  /// Generate all legal drops.
   std::vector<Board::Move> drops();
   /// Generate all potential checks.
   std::vector<Board::Move> checks();

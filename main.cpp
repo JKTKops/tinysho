@@ -20,19 +20,25 @@ int main() {
   moves.clear();
   */
 
-  Board::importFEN("k2TS/2G2/BS3/b2K1/R4 b PRg");
-  //Board::importFEN("k2T1/2GN1/BS3/b2K1/R4 w PRg");
+  // this one has a potential drop pawn checkmate
+  //Board::importFEN("k2TS/2G2/BS3/b2K1/R4 b PRg");
 
-//  Board::Move m(0,6,true);
-//  Board::do_move(m, si[0]);
-//  m = Board::Move(19, 23, false);
-//  Board::do_move(m, si[1]);
+  // this one has perft(2) < perft(1)
+  //Board::importFEN("k3S/B1GP1/5/GS1K1/R1B2 b RP");
+
+  // sente starts in check here
+  Board::importFEN("2k1S/B1rP1/2KG1/GS1p1/R1B2 b -");
+
+  //Board::Move m(8, Piece::color_piece(Piece::PAWN, Board::SENTE));
+  //Board::do_move(m, si[0]);
+  //m = Board::Move(19, 23, false);
+  //Board::do_move(m, si[1]);
   std::cout << Board::exportFEN() << std::endl;
   Board::print_board(std::cout);
   Board::check_consistency();
 
   Movegen::allow_drop_pawn_checkmate = true;
-  Movegen::Perft::perft(3, true);
+  Movegen::Perft::perft(4, true);
 
   /*
   Board::importFEN("k4/5/5/5/4K b PPSSGGBBRR");
