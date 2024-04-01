@@ -107,8 +107,8 @@ namespace Board {
 
       // If a piece is being captured...
       if (captured_piece != Piece::NO_PIECE) {
-        // add one of its piece type to our hand
-        Board::hand[us][Piece::type(captured_piece)]++;
+        // add one of its unpromoted piece type to our hand
+        Board::hand[us][Piece::upt(captured_piece)]++;
         st->capturedPiece = captured_piece;
       }
 
@@ -152,7 +152,7 @@ namespace Board {
       // Take care - the captured piece may have been promoted!
       Piece::piece captured = st->capturedPiece;
       if (captured != Piece::NO_PIECE) {
-        Board::hand[us][Piece::type(captured)]--;
+        Board::hand[us][Piece::upt(captured)]--;
         occupy(m.destination, captured, them);
       }
     }

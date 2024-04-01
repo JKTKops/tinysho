@@ -29,16 +29,18 @@ int main() {
   // sente starts in check here
   Board::importFEN("2k1S/B1rP1/2KG1/GS1p1/R1B2 b -");
 
-  //Board::Move m(8, Piece::color_piece(Piece::PAWN, Board::SENTE));
-  //Board::do_move(m, si[0]);
-  //m = Board::Move(19, 23, false);
-  //Board::do_move(m, si[1]);
+  // Board::Move m(12, 16, false);
+  // Board::do_move(m, si[0]);
+  // m = Board::Move(7, 22, true);
+  // Board::do_move(m, si[1]);
+  // m = Board::Move(24, 22, false);
+  // Board::do_move(m, si[2]);
   std::cout << Board::exportFEN() << std::endl;
   Board::print_board(std::cout);
   Board::check_consistency();
 
-  Movegen::allow_drop_pawn_checkmate = true;
-  Movegen::Perft::perft(4, true);
+  Movegen::allow_drop_pawn_checkmate = false;
+  Movegen::Perft::perft(6, true);
 
   /*
   Board::importFEN("k4/5/5/5/4K b PPSSGGBBRR");
